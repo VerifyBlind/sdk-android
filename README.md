@@ -2,7 +2,7 @@
 
 Android uygulamalarına VerifyBlind kimlik doğrulaması entegre etmek için resmi Android SDK.
 
-## Mimari
+## Mimari 
 
 ```
 [Partner Android App (SDK)]
