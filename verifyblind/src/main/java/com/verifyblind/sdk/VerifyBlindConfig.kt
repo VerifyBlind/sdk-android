@@ -29,8 +29,7 @@ data class VerifyBlindConfig(
     val verifyblindAppLinkBase: String,
     val verifyblindApiUrl: String = "https://api.verifyblind.com",
     val skipSecurityChecks: Boolean = false,
-    val certificatePins: List<String>? = null,
-    val cloudProjectNumber: Long? = null
+    val certificatePins: List<String>? = null
 ) {
     init {
         require(partnerBackendUrl.isNotBlank()) { "partnerBackendUrl boş olamaz." }

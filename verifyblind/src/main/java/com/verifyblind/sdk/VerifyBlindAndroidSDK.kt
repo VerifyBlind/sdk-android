@@ -8,7 +8,6 @@ import com.verifyblind.sdk.VerifyBlindException.ErrorCode
 import com.verifyblind.sdk.model.StartAuthRequest
 import com.verifyblind.sdk.model.StartAuthResult
 import com.verifyblind.sdk.network.NetworkClient
-import com.verifyblind.sdk.util.IntegrityHelper
 import com.verifyblind.sdk.crypto.CryptoUtils
 import org.json.JSONObject
 import java.security.KeyPair
@@ -73,24 +72,9 @@ class VerifyBlindAndroidSDK(private val config: VerifyBlindConfig) {
         val pkHash = CryptoUtils.computePkHash(publicKeyBase64)
         Log.d(TAG, "[VerifyBlind SDK] pk_hash: ${pkHash.take(16)}...")
 
-        // 3. Play Integrity Attestation (Opsiyonel)
-        var integrityToken: String? = null
-        if (config.cloudProjectNumber != null) {
-            try {
-                Log.d(TAG, "[VerifyBlind SDK] Play Integrity token talep ediliyor...")
-                val nonceHash = CryptoUtils.sha256("${System.currentTimeMillis()}")
-                integrityToken = IntegrityHelper.requestIntegrityToken(context, config.cloudProjectNumber, nonceHash)
-                Log.d(TAG, "[VerifyBlind SDK] Play Integrity token alındı.")
-            } catch (e: Exception) {
-                Log.e(TAG, "[VerifyBlind SDK] Play Integrity hatası: ${e.message}")
-                if (!config.skipSecurityChecks) throw e
-            }
-        }
-
-        // 4. Partner backend proxy'ye gönder → { nonce } al
+        // 3. Partner backend proxy'ye gönder → { nonce } al
         val request = StartAuthRequest(
             public_key = publicKeyBase64,
-            integrity_token = integrityToken,
             validations = validations,
             custom_data = customData
         )
@@ -128,7 +112,7 @@ class VerifyBlindAndroidSDK(private val config: VerifyBlindConfig) {
 
         Log.d(TAG, "[VerifyBlind SDK] Nonce alındı: $nonce")
 
-        // 5. VerifyBlind App Link'ini aç
+        // 4. VerifyBlind App Link'ini aç
         openAppLink(context, nonce, pkHash)
 
         return StartAuthResult(

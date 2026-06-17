@@ -29,7 +29,6 @@ data class PartnerBackendResponse(
  */
 data class StartAuthRequest(
     val public_key: String,
-    val integrity_token: String? = null,
     val validations: Map<String, Any>? = null,
     val custom_data: Map<String, Any>? = null
 )
