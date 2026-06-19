@@ -96,6 +96,18 @@ app.post('/api/auth/verifyblind-generate', async (req, res) => {
 });
 ```
 
+## Tekillik / Tanıma Kodları
+
+`validations` içinde `user_id: true` isterseniz, çözülen yanıtta **üç kod birden** döner — üçünü de saklayın:
+
+| Alan | Anlam |
+|------|-------|
+| `user_id` | Ulusal-no bazlı kimlik (TCKN yoksa boş). Partner'a özel HMAC. |
+| `nsbd_id` | Biyografik kişi kodu; kişinin tüm kartlarında sabit. **Olasılıksal ipucu** — tek başına sert dedup kararı vermeyin. |
+| `doc_id` | Belge kodu; aynı `doc_id` = aynı fiziksel belge = aynı kişi (sert sinyal). |
+
+Üçü de partner'a özeldir (başka partner ile eşleştirilemez) ve TCKN'ye döndürülemez. Üçünü birlikte saklamak, bir ülke ulusal kimlik numarasını sonradan kaldırsa/eklese veya kullanıcı kartını yenilese bile aynı kişiyi tanımanızı sağlar.
+
 ## Konfigürasyon Parametreleri
 
 | Parametre | Zorunlu | Varsayılan | Açıklama |
