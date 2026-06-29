@@ -1,5 +1,7 @@
 # VerifyBlind Android SDK
 
+> **Kimliğinizi Kanıtlayın, Gizliliğinizi Koruyun** · _Prove Your Identity, Protect Your Privacy_
+
 **[🇹🇷 Türkçe](#türkçe) · [🇬🇧 English](#english)**
 
 ---
