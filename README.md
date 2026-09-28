@@ -10,31 +10,32 @@
 
 Android uygulamalarına VerifyBlind kimlik doğrulaması entegre etmek için resmi Android SDK.
 
-## Mimari 
+## Mimari
 
 ```
-[Partner Android App (SDK)]
+[Partner Android App (SDK)]      ← Geçici RSA-OAEP anahtar çifti burada üretilir
         │
-        │  POST { validations, custom_data }
+        │  POST { public_key, validations, custom_data }
         ▼
-[Partner'ın Backend Sunucusu]   ← Private Key BURADA, asla mobil uygulamada değil!
+[Partner'ın Backend Sunucusu]    ← Yalnızca aracı: X-API-Key ekler, gövdeyi olduğu gibi iletir
         │
-        │  İmzalı request (Node/NET SDK ile)
+        │  POST /api/pop/generate
         ▼
-[VerifyBlind API]
+[VerifyBlind API]  ──► { nonce }
         │
-        │  { nonce, pkHash }
         ▼
 [Partner Android App (SDK)]
         │
         │  https://app.verifyblind.com/request?nonce=...&pk_hash=...
         ▼
-[VerifyBlind Mobile]               ← Kullanıcı kimlik doğrular
+[VerifyBlind Mobil Uygulaması]   ← Kullanıcı kimliğini doğrular
         │
-        │  Callback (partner backend'e)
         ▼
-[Partner Backend]               ← Şifreli yanıtı .NET/Node SDK ile çözer
+[Partner Android App (SDK)]      ← GET /api/pop/result/{nonce} ile sonucu sorar,
+                                    şifreli yanıtı geçici özel anahtarla cihazda çözer
 ```
+
+API anahtarınız yalnızca backend'inizde durur; mobil uygulamada hiçbir gizli anahtar bulunmaz.
 
 ## Kurulum
 
@@ -60,47 +61,91 @@ import com.verifyblind.sdk.VerifyBlindException
 
 val sdk = VerifyBlindAndroidSDK(
     VerifyBlindConfig(
-        partnerBackendUrl = "https://partner.example.com/api/auth/verifyblind-generate"
+        partnerBackendUrl      = "https://partner.example.com/api/auth/",
+        generateEndpoint       = "verifyblind-generate",
+        verifyblindAppLinkBase = "https://app.verifyblind.com/request"
     )
 )
 
 viewModelScope.launch {
     try {
-        val result = sdk.startAuthentication(
+        val start = sdk.startAuthentication(
             context     = context,
-            validations = mapOf("age_min" to 18)  // İsteğe bağlı
+            validations = mapOf("age" to "18+", "user_id" to true)  // İsteğe bağlı
         )
-        // VerifyBlind uygulaması otomatik açılır
-        // result.nonce, result.pkHash bilgi için döner
+        // VerifyBlind uygulaması açılır. Kullanıcı uygulamanıza döndüğünde sonucu sorun:
+        val result = sdk.checkVerificationResult(start.nonce)  // null = henüz bekliyor
+        // result["validations"] → { age: true, user_id: "...", nsbd_id: "...", doc_id: "..." }
     } catch (e: VerifyBlindException) {
-        // e.code: NETWORK_ERROR | PARTNER_BACKEND_ERROR
-        //         INVALID_RESPONSE | APP_LINK_FAILED
+        // e.code: NETWORK_ERROR | PARTNER_BACKEND_ERROR | INVALID_RESPONSE
+        //         APP_LINK_FAILED | USER_CANCELLED (e.cancelReason ile)
     }
 }
 ```
+
+`checkVerificationResult`, sonuç hazır değilken `null` döner; birkaç saniye arayla tekrar çağırın. Kullanıcı
+işlemi iptal ettiyse `USER_CANCELLED` koduyla `VerifyBlindException` fırlatır; iptal nedeni
+`cancelReason` alanındadır (`no_card_registered`, `user_declined`, `fingerprint_failed`, `session_expired`,
+`user_cancelled`). Nonce 15 dakika geçerlidir.
+
+### Doğrulamadan sonra uygulamanıza dönüş (app-to-app)
+
+VerifyBlind'ı kendi mobil uygulamanızdan açtığınızda `returnUrl` verirseniz, akış bittiğinde (başarı ya da
+iptal) VerifyBlind kullanıcıyı **uygulamanıza geri getirir**.
+
+```kotlin
+val start = sdk.startAuthentication(
+    context     = context,
+    validations = mapOf("user_id" to true),
+    returnUrl   = "verifyblinddemo://callback"   // uygulamanızın özel şeması
+)
+```
+
+İşlem bitince VerifyBlind `verifyblinddemo://callback?nonce={nonce}&status=success` (ya da
+`status=cancelled`) adresini açar ve uygulamanız öne gelir. Sonucu okumak için `checkVerificationResult`
+ile sormaya devam edin.
+
+**Gereken iki adım:**
+
+1. Şemayı VerifyBlind Partner Portalı → *Ayarlar → Uygulamaya Dönüş Şeması* bölümüne kaydedin
+   (ör. `verifyblinddemo`). VerifyBlind yalnızca **kayıtlı şemayla eşleşen** dönüş adreslerini açar;
+   alan boşsa uygulamaya dönüş kapalıdır.
+2. Şemayı `AndroidManifest.xml` içinde tanımlayın:
+
+```xml
+<activity android:name=".MainActivity" android:exported="true">
+    <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="verifyblinddemo" android:host="callback" />
+    </intent-filter>
+</activity>
+```
+
+> QR (cihazlar arası) akışlarında `returnUrl` kullanılmaz — dönülecek bir uygulama yoktur.
 
 ## Partner Backend Endpoint'i
 
 Partner backend'inizde şu endpoint'i oluşturun:
 
 ```typescript
-// Node.js örneği — imza YOK; kimlik doğrulama X-API-Key header'ı ile.
+// Node.js örneği — kimlik doğrulama X-API-Key header'ı ile.
 // SDK'nın gönderdiği gövde: { public_key, validations?, custom_data? }
 app.post('/api/auth/verifyblind-generate', async (req, res) => {
-    // Gövdeyi olduğu gibi ilet; yalnızca gizli API key'i header'da ekle (tarayıcıya sızmaz).
-    const response = await axios.post(
-        'https://api.verifyblind.com/api/pop/generate',
-        req.body,
-        { headers: { 'X-API-Key': process.env.VERIFYBLIND_API_KEY } }
-    );
-
-    // Relay { nonce } döner. SDK pk_hash'i kendi hesaplar; proxy yalnız nonce döndürmeli.
-    res.json({ nonce: response.data.nonce });
+    // Gövdeyi olduğu gibi ilet; gizli API key'i yalnızca header'da ekle.
+    const response = await fetch('https://api.verifyblind.com/api/pop/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': process.env.VERIFYBLIND_API_KEY },
+        body: JSON.stringify(req.body),
+    });
+    // Durum kodunu koru; relay { nonce } döner. pk_hash'i SDK kendisi hesaplar.
+    res.status(response.status).json(await response.json());
 });
 ```
 
 > **Not:** SDK, `additional_data` yerine `custom_data` alanını gönderir; relay `/api/pop/generate`
-> her ikisini de kabul eder (geriye-uyum). Gövdeyi yukarıdaki gibi olduğu gibi iletmek yeterlidir.
+> ikisini de kabul eder. Gövdeyi olduğu gibi iletmek yeterlidir.
 
 ## Tekillik / Tanıma Kodları
 
@@ -108,29 +153,38 @@ app.post('/api/auth/verifyblind-generate', async (req, res) => {
 
 | Alan | Anlam |
 |------|-------|
-| `user_id` | Ulusal-no bazlı kimlik (TCKN yoksa boş). Partner'a özel HMAC. |
-| `nsbd_id` | Biyografik kişi kodu; **ad ve doğum tarihi değişmediği sürece** kişinin kartları arasında sabit. **Olasılıksal ipucu** — tek başına sert dedup kararı vermeyin. Kayabileceği durumlar: isim değişikliği (ör. evlilik) ve uzun isimlerin kimlik kartı ↔ pasaport arasında farklı kırpılması (MRZ kırpması ICAO 9303'te ihraççı takdirindedir). Sert karar için `doc_id` kullanın. |
+| `user_id` | Ulusal-no bazlı kimlik. Partner'a özel HMAC. Türetilemezse alan yanıtta yer almaz. |
+| `nsbd_id` | Biyografik kişi kodu; **ad ve doğum tarihi değişmediği sürece** kişinin kartları arasında sabit. **Olasılıksal ipucu** — tek başına sert dedup kararı vermeyin. Kayabileceği durumlar: isim değişikliği (ör. evlilik) ve uzun isimlerin farklı belgelerde farklı kırpılması (MRZ kırpması ICAO 9303'te ihraççı takdirindedir). Sert karar için `doc_id` kullanın. |
 | `doc_id` | Belge kodu; aynı `doc_id` = aynı fiziksel belge = aynı kişi (sert sinyal). |
 
-Üçü de partner'a özeldir (başka partner ile eşleştirilemez) ve TCKN'ye döndürülemez. Üçünü birlikte saklamak, bir ülke ulusal kimlik numarasını sonradan kaldırsa/eklese veya kullanıcı kartını yenilese bile aynı kişiyi tanımanızı sağlar.
+Üçü de partner'a özeldir (başka partner ile eşleştirilemez) ve TCKN'ye döndürülemez. Demo kartla yapılan
+doğrulamalarda `validations.is_test: true` döner ve kodlar `TEST_` önekiyle gelir.
 
 ## Konfigürasyon Parametreleri
 
 | Parametre | Zorunlu | Varsayılan | Açıklama |
 |-----------|---------|-----------|----------|
-| `partnerBackendUrl` | ✅ | — | Signed request üretip nonce döndüren endpoint |
-| `verifyblindAppLinkBase` | ❌ | `https://app.verifyblind.com/request` | VerifyBlind App Link base URL |
-| `skipSecurityChecks` | ❌ | `false` | Yalnızca geliştirme ortamı içindir |
+| `partnerBackendUrl` | ✅ | — | Backend'inizdeki aracı (proxy) endpoint'in taban adresi |
+| `generateEndpoint` | ❌ | `.` | `partnerBackendUrl`'e eklenen göreli yol |
+| `verifyblindAppLinkBase` | ✅ | — | VerifyBlind App Link adresi: `https://app.verifyblind.com/request` |
+| `verifyblindApiUrl` | ❌ | `https://api.verifyblind.com` | Sonucun sorgulandığı VerifyBlind API adresi |
+| `certificatePins` | ❌ | `null` | İsteğe bağlı sertifika sabitleme listesi (OkHttp pin biçimi) |
+| `skipSecurityChecks` | ❌ | `false` | Yalnızca geliştirme ortamı içindir; sertifika sabitlemeyi kapatır |
 
 ## Güvenlik Notları
 
-- **Private Key asla mobil uygulamada olmamalıdır.** İmzalama işlemi partner'ın backend sunucusunda gerçekleşir.
+- **API anahtarı asla mobil uygulamada olmamalıdır.** Anahtar yalnızca backend'inizdeki aracı endpoint'te kullanılır.
+- Sonuç, cihazda üretilen geçici anahtarla şifreli gelir ve yalnızca aynı `VerifyBlindAndroidSDK` örneği çözebilir.
+- SDK, çözülmüş sonucu uygulamanıza verir; enclave imzasını ve kanıtını ayrıca döndürmez. Sonucun
+  sunucunuzda imzasıyla doğrulanması gereken senaryolarda web entegrasyonunu kullanın
+  (bkz. [Geliştirici Dokümantasyonu](https://verifyblind.com/developers)).
 - `skipSecurityChecks=true` yalnızca geliştirme/test ortamı içindir. Üretimde kullanmayınız.
+
 ## Sürüm Geçmişi
 
 | Sürüm | Açıklama |
 |-------|----------|
-| 1.0.0 | İlk sürüm: validations, App Link desteği |
+| 1.0.0 | İlk sürüm: geçici anahtarlı (PoP) akış, validations, App Link ve uygulamaya dönüş desteği |
 
 ---
 
@@ -141,35 +195,34 @@ The official Android SDK for integrating VerifyBlind identity verification into 
 ### Architecture
 
 ```
-[Partner Android App (SDK)]
+[Partner Android App (SDK)]      ← A temporary RSA-OAEP key pair is generated here
         │
-        │  POST { validations, custom_data }
+        │  POST { public_key, validations, custom_data }
         ▼
-[Partner's Backend Server]      ← Private Key lives HERE, never in the mobile app!
+[Partner Backend Server]         ← Proxy only: adds X-API-Key, forwards the body as is
         │
-        │  Signed request (via the Node/.NET SDK)
+        │  POST /api/pop/generate
         ▼
-[VerifyBlind API]
+[VerifyBlind API]  ──► { nonce }
         │
-        │  { nonce, pkHash }
         ▼
 [Partner Android App (SDK)]
         │
         │  https://app.verifyblind.com/request?nonce=...&pk_hash=...
         ▼
-[VerifyBlind Mobile]            ← User verifies their identity
+[VerifyBlind Mobile App]         ← The user verifies their identity
         │
-        │  Callback (to the partner backend)
         ▼
-[Partner Backend]               ← Decrypts the encrypted response via the .NET/Node SDK
+[Partner Android App (SDK)]      ← Polls GET /api/pop/result/{nonce} and decrypts the
+                                    encrypted response on the device with the temporary key
 ```
+
+Your API key stays only on your backend; there is no secret in the mobile app.
 
 ### Installation
 
-`build.gradle.kts`:
-
 ```kotlin
-// In settings.gradle.kts, add the SDK module:
+// Add the SDK module in settings.gradle.kts:
 include(":verifyblind")
 project(":verifyblind").projectDir = File("path/to/verifyblind-android/verifyblind")
 
@@ -188,24 +241,32 @@ import com.verifyblind.sdk.VerifyBlindException
 
 val sdk = VerifyBlindAndroidSDK(
     VerifyBlindConfig(
-        partnerBackendUrl = "https://partner.example.com/api/auth/verifyblind-generate"
+        partnerBackendUrl      = "https://partner.example.com/api/auth/",
+        generateEndpoint       = "verifyblind-generate",
+        verifyblindAppLinkBase = "https://app.verifyblind.com/request"
     )
 )
 
 viewModelScope.launch {
     try {
-        val result = sdk.startAuthentication(
+        val start = sdk.startAuthentication(
             context     = context,
-            validations = mapOf("age_min" to 18)  // Optional
+            validations = mapOf("age" to "18+", "user_id" to true)  // Optional
         )
-        // The VerifyBlind app opens automatically
-        // result.nonce, result.pkHash are returned for reference
+        // The VerifyBlind app opens. When the user returns to your app, ask for the result:
+        val result = sdk.checkVerificationResult(start.nonce)  // null = still pending
+        // result["validations"] → { age: true, user_id: "...", nsbd_id: "...", doc_id: "..." }
     } catch (e: VerifyBlindException) {
-        // e.code: NETWORK_ERROR | PARTNER_BACKEND_ERROR
-        //         INVALID_RESPONSE | APP_LINK_FAILED
+        // e.code: NETWORK_ERROR | PARTNER_BACKEND_ERROR | INVALID_RESPONSE
+        //         APP_LINK_FAILED | USER_CANCELLED (with e.cancelReason)
     }
 }
 ```
+
+`checkVerificationResult` returns `null` while the result is not ready; call it again every few seconds.
+If the user cancelled, it throws a `VerifyBlindException` with code `USER_CANCELLED`; the reason is in
+`cancelReason` (`no_card_registered`, `user_declined`, `fingerprint_failed`, `session_expired`,
+`user_cancelled`). The nonce is valid for 15 minutes.
 
 ### Returning to your app after verification (app-to-app)
 
@@ -213,7 +274,7 @@ When you launch VerifyBlind from your own mobile app, pass a `returnUrl` so Veri
 **back to your app** when the flow ends (success or cancel) — instead of leaving them inside VerifyBlind.
 
 ```kotlin
-val result = sdk.startAuthentication(
+val start = sdk.startAuthentication(
     context     = context,
     validations = mapOf("user_id" to true),
     returnUrl   = "verifyblinddemo://callback"   // your app's custom scheme
@@ -221,8 +282,7 @@ val result = sdk.startAuthentication(
 ```
 
 When done, VerifyBlind opens `verifyblinddemo://callback?nonce={nonce}&status=success` (or
-`status=cancelled`), which foregrounds your app. Resume polling (`checkVerificationResult`) to read the
-result.
+`status=cancelled`), which foregrounds your app. Keep calling `checkVerificationResult` to read the result.
 
 **Two required steps:**
 
@@ -242,8 +302,6 @@ result.
 </activity>
 ```
 
-Read `nonce` + `status` in `onCreate` / `onNewIntent` and resume polling.
-
 > QR (cross-device) flows ignore `returnUrl` — there is no caller app to return to.
 
 ### Partner Backend Endpoint
@@ -251,51 +309,61 @@ Read `nonce` + `status` in `onCreate` / `onNewIntent` and resume polling.
 Create this endpoint on your partner backend:
 
 ```typescript
-// Node.js example — no signing; auth is via the X-API-Key header.
-// The SDK posts a body of: { public_key, validations?, custom_data? }
+// Node.js example — authentication is the X-API-Key header.
+// Body sent by the SDK: { public_key, validations?, custom_data? }
 app.post('/api/auth/verifyblind-generate', async (req, res) => {
-    // Forward the body as-is; just attach your secret API key in the header (never exposed to the client).
-    const response = await axios.post(
-        'https://api.verifyblind.com/api/pop/generate',
-        req.body,
-        { headers: { 'X-API-Key': process.env.VERIFYBLIND_API_KEY } }
-    );
-
-    // The relay returns { nonce }. The SDK computes pk_hash itself; the proxy only needs to return nonce.
-    res.json({ nonce: response.data.nonce });
+    // Forward the body as is; add the secret API key only in the header.
+    const response = await fetch('https://api.verifyblind.com/api/pop/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': process.env.VERIFYBLIND_API_KEY },
+        body: JSON.stringify(req.body),
+    });
+    // Preserve the status code; the relay returns { nonce }. The SDK computes pk_hash itself.
+    res.status(response.status).json(await response.json());
 });
 ```
 
+> **Note:** the SDK sends `custom_data` instead of `additional_data`; the relay's `/api/pop/generate`
+> accepts both. Forwarding the body as is is enough.
+
 ### Uniqueness / Recognition Codes
 
-If you request `user_id: true` inside `validations`, the decrypted response returns **three codes at
-once** — store all three:
+If you request `user_id: true` in `validations`, the decrypted response returns **three codes at once** —
+store all three:
 
 | Field | Meaning |
 |-------|---------|
-| `user_id` | National-number-based identity (empty if there is no national number). Partner-specific HMAC. |
-| `nsbd_id` | Biographic person code; stable across a person's cards **as long as name and date of birth do not change**. **Probabilistic hint** — don't make a hard dedup decision on it alone. It can drift on a name change (e.g. marriage) or when a long name is truncated differently on an ID card vs a passport (MRZ truncation is at the issuer's discretion under ICAO 9303). Use `doc_id` for hard decisions. |
-| `doc_id` | Document code; the same `doc_id` = the same physical document = the same person (hard signal). |
+| `user_id` | National-ID-based identity. Partner-specific HMAC. Left out of the response if it cannot be derived. |
+| `nsbd_id` | Biographic person code; stable across a person's cards **as long as name and date of birth do not change**. A **probabilistic hint** — do not make a hard dedup decision on it alone. It can drift on a name change (e.g. marriage) or when a long name is truncated differently on different documents (MRZ truncation is at the issuer's discretion under ICAO 9303). Use `doc_id` for hard decisions. |
+| `doc_id` | Document code; same `doc_id` = same physical document = same person (hard signal). |
 
-All three are partner-specific (cannot be correlated with another partner) and cannot be reversed to a
-national ID number. Storing all three lets you recognize the same person even if a country later removes
-or adds a national ID number, or the user renews their card.
+All three are partner-specific (cannot be linked across partners) and cannot be reversed to the national ID
+number. Verifications made with a demo card return `validations.is_test: true`, and the codes carry a
+`TEST_` prefix.
 
 ### Configuration Parameters
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `partnerBackendUrl` | ✅ | — | Endpoint that produces a signed request and returns the nonce |
-| `verifyblindAppLinkBase` | ❌ | `https://app.verifyblind.com/request` | VerifyBlind App Link base URL |
-| `skipSecurityChecks` | ❌ | `false` | Development environment only |
+| `partnerBackendUrl` | ✅ | — | Base URL of the proxy endpoint on your backend |
+| `generateEndpoint` | ❌ | `.` | Relative path appended to `partnerBackendUrl` |
+| `verifyblindAppLinkBase` | ✅ | — | VerifyBlind App Link: `https://app.verifyblind.com/request` |
+| `verifyblindApiUrl` | ❌ | `https://api.verifyblind.com` | VerifyBlind API the result is polled from |
+| `certificatePins` | ❌ | `null` | Optional certificate pin list (OkHttp pin format) |
+| `skipSecurityChecks` | ❌ | `false` | For development only; disables certificate pinning |
 
 ### Security Notes
 
-- **The private key must never be in the mobile app.** Signing happens on the partner's backend server.
-- `skipSecurityChecks=true` is for development/test only. Do not use it in production.
+- **The API key must never be in the mobile app.** It is used only in the proxy endpoint on your backend.
+- The result arrives encrypted with the temporary key generated on the device, and only the same
+  `VerifyBlindAndroidSDK` instance can decrypt it.
+- The SDK gives your app the decrypted result; it does not also return the enclave signature and proof.
+  Where your server must verify the result by its signature, use the web integration
+  (see the [Developer Documentation](https://verifyblind.com/developers)).
+- `skipSecurityChecks=true` is for development/testing only. Do not use it in production.
 
 ### Version History
 
 | Version | Description |
 |---------|-------------|
-| 1.0.0 | First release: validations, App Link support |
+| 1.0.0 | First release: temporary-key (PoP) flow, validations, App Link and app-return support |
