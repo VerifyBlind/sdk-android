@@ -17,7 +17,7 @@ Android uygulamalarına VerifyBlind kimlik doğrulaması entegre etmek için res
         │
         │  POST { public_key, validations, custom_data }
         ▼
-[Partner'ın Backend Sunucusu]    ← Yalnızca aracı: X-API-Key ekler, gövdeyi olduğu gibi iletir
+[Partner'ın Backend Sunucusu]    ← Aracı: X-API-Key ekler, validations'ı KENDİ ayarından koyar
         │
         │  POST /api/pop/generate
         ▼
@@ -131,20 +131,27 @@ Partner backend'inizde şu endpoint'i oluşturun:
 ```typescript
 // Node.js örneği — kimlik doğrulama X-API-Key header'ı ile.
 // SDK'nın gönderdiği gövde: { public_key, validations?, custom_data? }
+// Ne sorulacağına SUNUCUNUZ karar verir: uygulamanın gönderdiği validations kullanılmaz.
+// (İstek değiştirilebilir — "18+" yerine "1+" soran biri de imzalı age: true alır.)
+const VALIDATIONS = { age: '18+', user_id: true };
+
 app.post('/api/auth/verifyblind-generate', async (req, res) => {
-    // Gövdeyi olduğu gibi ilet; gizli API key'i yalnızca header'da ekle.
+    const { public_key, custom_data } = req.body;
     const response = await fetch('https://api.verifyblind.com/api/pop/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': process.env.VERIFYBLIND_API_KEY },
-        body: JSON.stringify(req.body),
+        body: JSON.stringify({ public_key, custom_data, validations: VALIDATIONS }),
     });
     // Durum kodunu koru; relay { nonce } döner. pk_hash'i SDK kendisi hesaplar.
+    // Sonucu sunucuda kontrol edecekseniz nonce'u sorduğunuz koşulla birlikte saklayın (TTL 960 sn).
     res.status(response.status).json(await response.json());
 });
 ```
 
 > **Not:** SDK, `additional_data` yerine `custom_data` alanını gönderir; relay `/api/pop/generate`
-> ikisini de kabul eder. Gövdeyi olduğu gibi iletmek yeterlidir.
+> ikisini de kabul eder. `public_key` ve `custom_data` aynen iletilir; `validations` ise her zaman
+> sunucunuzun ayarından gelir. İmzalı sonuçtaki `validations.age_condition` (yeni enclave sürümlerinde)
+> sorulan koşulu gösterir; sizin sorduğunuz koşula eşit olmalıdır.
 
 ## Tekillik / Tanıma Kodları
 
@@ -198,7 +205,7 @@ The official Android SDK for integrating VerifyBlind identity verification into 
         │
         │  POST { public_key, validations, custom_data }
         ▼
-[Partner Backend Server]         ← Proxy only: adds X-API-Key, forwards the body as is
+[Partner Backend Server]         ← Proxy: adds X-API-Key, sets validations from ITS OWN config
         │
         │  POST /api/pop/generate
         ▼
@@ -311,20 +318,27 @@ Create this endpoint on your partner backend:
 ```typescript
 // Node.js example — authentication is the X-API-Key header.
 // Body sent by the SDK: { public_key, validations?, custom_data? }
+// YOUR SERVER decides what is asked: the validations sent by the app are not used.
+// (The request can be edited — someone who asks "1+" instead of "18+" also gets a signed age: true.)
+const VALIDATIONS = { age: '18+', user_id: true };
+
 app.post('/api/auth/verifyblind-generate', async (req, res) => {
-    // Forward the body as is; add the secret API key only in the header.
+    const { public_key, custom_data } = req.body;
     const response = await fetch('https://api.verifyblind.com/api/pop/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': process.env.VERIFYBLIND_API_KEY },
-        body: JSON.stringify(req.body),
+        body: JSON.stringify({ public_key, custom_data, validations: VALIDATIONS }),
     });
     // Preserve the status code; the relay returns { nonce }. The SDK computes pk_hash itself.
+    // If your server checks the result later, store the nonce with the condition you asked (TTL 960 s).
     res.status(response.status).json(await response.json());
 });
 ```
 
 > **Note:** the SDK sends `custom_data` instead of `additional_data`; the relay's `/api/pop/generate`
-> accepts both. Forwarding the body as is is enough.
+> accepts both. Forward `public_key` and `custom_data` unchanged; `validations` always come from your
+> server configuration. In the signed result, `validations.age_condition` (newer enclave releases)
+> states the condition that was asked; it must equal the condition you asked.
 
 ### Uniqueness / Recognition Codes
 
