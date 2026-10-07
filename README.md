@@ -39,18 +39,17 @@ API anahtarınız yalnızca backend'inizde durur; mobil uygulamada hiçbir gizli
 
 ## Kurulum
 
-### `build.gradle.kts`
+SDK, Maven Central'da yayımlanır. `mavenCentral()` deposu (Android projelerinde varsayılan olarak
+açıktır) yeterlidir:
 
 ```kotlin
-// settings.gradle.kts'e SDK modülünü ekleyin:
-include(":verifyblind")
-project(":verifyblind").projectDir = File("path/to/verifyblind-android/verifyblind")
-
-// app/build.gradle.kts:
+// app/build.gradle.kts
 dependencies {
-    implementation(project(":verifyblind"))
+    implementation("com.verifyblind:verifyblind-android:1.0.0")
 }
 ```
+
+Gereksinimler: `minSdk 24`, Java 17.
 
 ## Hızlı Başlangıç
 
@@ -221,16 +220,17 @@ Your API key stays only on your backend; there is no secret in the mobile app.
 
 ### Installation
 
-```kotlin
-// Add the SDK module in settings.gradle.kts:
-include(":verifyblind")
-project(":verifyblind").projectDir = File("path/to/verifyblind-android/verifyblind")
+The SDK is published on Maven Central. The `mavenCentral()` repository (enabled by default in Android
+projects) is all you need:
 
-// app/build.gradle.kts:
+```kotlin
+// app/build.gradle.kts
 dependencies {
-    implementation(project(":verifyblind"))
+    implementation("com.verifyblind:verifyblind-android:1.0.0")
 }
 ```
+
+Requirements: `minSdk 24`, Java 17.
 
 ### Quick Start
 
@@ -367,3 +367,9 @@ number. Verifications made with a demo card return `validations.is_test: true`, 
 | Version | Description |
 |---------|-------------|
 | 1.0.0 | First release: temporary-key (PoP) flow, validations, App Link and app-return support |
+
+---
+
+## Lisans · License
+
+Apache License 2.0 — bkz. / see [LICENSE](LICENSE).

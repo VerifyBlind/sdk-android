@@ -1,0 +1,39 @@
+name: Publish to Maven Central
+
+# Bir sürüm etiketi (ör. v1.0.0) gönderilince çalışır. Etiketteki sürüm, gradle.properties'teki
+# VERSION_NAME ile aynı olmalı. Yükleme Central Portal'a "deployment" olarak gider; son yayın
+# onayı portaldan verilir (otomatik yayın kapalı).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Check tag matches VERSION_NAME
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          v=$(grep '^VERSION_NAME=' gradle.properties | cut -d= -f2)
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "Tag ${GITHUB_REF_NAME} != VERSION_NAME $v"; exit 1; }
+
+      - name: Publish
+        run: ./gradlew --no-daemon publishToMavenCentral
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
