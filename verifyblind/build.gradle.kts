@@ -59,7 +59,7 @@ mavenPublishing {
         name.set("VerifyBlind Android SDK")
         description.set("Android SDK for VerifyBlind zero-knowledge identity verification: prove age or uniqueness with a chipped Turkish ID card without sharing personal data.")
         inceptionYear.set("2026")
-        url.set("https://github.com/VerifyBlind/sdk-android")
+        url.set("https://verifyblind.com/en/developers")
         licenses {
             license {
                 name.set("The Apache License, Version 2.0")
