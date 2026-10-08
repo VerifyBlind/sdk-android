@@ -3,6 +3,7 @@ package com.verifyblind.sdk
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Base64
 import android.util.Log
 import com.verifyblind.sdk.VerifyBlindException.ErrorCode
 import com.verifyblind.sdk.model.StartAuthRequest
@@ -129,6 +130,10 @@ class VerifyBlindAndroidSDK(private val config: VerifyBlindConfig) {
      *
      * @param nonce Sorgulanacak işlemin nonce değeri.
      * @return Map<String, Any>? — Tamamlanmışsa çözülmüş veri, henüz beklemedeyse null.
+     *   `token` alanı enclave'in imzaladığı ham yanıttır: base64(JSON `{ payload, signature }`), web
+     *   widget'ının `onSuccess` token'ıyla aynı biçim. Karar vermeden önce bunu sunucunuza gönderin;
+     *   sunucunuz imzayı doğrulasın ve nonce'u sakladığı koşulla karşılaştırsın. Telefondaki
+     *   `validations`'a tek başına güvenmeyin.
      */
     suspend fun checkVerificationResult(nonce: String): Map<String, Any>? {
         val keyPair = currentKeyPair ?: run {
@@ -200,6 +205,11 @@ class VerifyBlindAndroidSDK(private val config: VerifyBlindConfig) {
                     is org.json.JSONObject -> result[key] = parseJsonObject(value)
                     else -> result[key] = value.toString()
                 }
+            }
+
+            // Sunucu doğrulaması için imzalı ham yanıt (web widget token'ıyla aynı biçim).
+            if (json.optString("payload").isNotEmpty() && json.optString("signature").isNotEmpty()) {
+                result["token"] = Base64.encodeToString(plaintext.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
             }
 
             Log.i(TAG, "[VerifyBlind SDK] Doğrulama tamamlandı.")

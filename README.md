@@ -45,7 +45,7 @@ açıktır) yeterlidir:
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("com.verifyblind:verifyblind-android:1.0.0")
+    implementation("com.verifyblind:verifyblind-android:1.0.1")
 }
 ```
 
@@ -74,6 +74,7 @@ viewModelScope.launch {
         )
         // VerifyBlind uygulaması açılır. Kullanıcı uygulamanıza döndüğünde sonucu sorun:
         val result = sdk.checkVerificationResult(start.nonce)  // null = henüz bekliyor
+        // result["token"] → imzalı ham yanıt; KARAR İÇİN bunu sunucunuza gönderin (aşağıya bakın)
         // result["validations"] → { age: true, user_id: "...", nsbd_id: "...", doc_id: "..." }
     } catch (e: VerifyBlindException) {
         // e.code: NETWORK_ERROR | PARTNER_BACKEND_ERROR | INVALID_RESPONSE
@@ -81,6 +82,12 @@ viewModelScope.launch {
     }
 }
 ```
+
+**Sunucuda doğrulama (önemli):** Engelleme, ödül ya da yaş kapısı gibi bir kararı telefondaki sonuca göre
+vermeyin; uygulama kandırılabilir. `result["token"]`'ı kendi sunucunuza gönderin. Sunucunuz web
+entegrasyonundakiyle **aynı doğrulamayı** yapar: imzayı (RSA-PSS, enclave anahtarı) doğrular, nonce'u
+tek seferlik tüketir ve sonucu nonce ile sakladığı koşula göre okur. Ayrıntılar:
+https://verifyblind.com/ai-integration.md (desen A, 4. adım).
 
 `checkVerificationResult`, sonuç hazır değilken `null` döner; birkaç saniye arayla tekrar çağırın. Kullanıcı
 işlemi iptal ettiyse `USER_CANCELLED` koduyla `VerifyBlindException` fırlatır; iptal nedeni
@@ -190,6 +197,7 @@ doğrulamalarda `validations.is_test: true` döner ve kodlar `TEST_` önekiyle g
 
 | Sürüm | Açıklama |
 |-------|----------|
+| 1.0.1 | Sonuçta `token` alanı: enclave'in imzaladığı ham yanıt (web widget token'ıyla aynı biçim); sunucuda doğrulamak için |
 | 1.0.0 | İlk sürüm: geçici anahtarlı (PoP) akış, validations, App Link ve uygulamaya dönüş desteği |
 
 ---
@@ -233,7 +241,7 @@ projects) is all you need:
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("com.verifyblind:verifyblind-android:1.0.0")
+    implementation("com.verifyblind:verifyblind-android:1.0.1")
 }
 ```
 
@@ -262,6 +270,7 @@ viewModelScope.launch {
         )
         // The VerifyBlind app opens. When the user returns to your app, ask for the result:
         val result = sdk.checkVerificationResult(start.nonce)  // null = still pending
+        // result["token"] → the signed raw answer; send THIS to your server for any decision (see below)
         // result["validations"] → { age: true, user_id: "...", nsbd_id: "...", doc_id: "..." }
     } catch (e: VerifyBlindException) {
         // e.code: NETWORK_ERROR | PARTNER_BACKEND_ERROR | INVALID_RESPONSE
@@ -269,6 +278,12 @@ viewModelScope.launch {
     }
 }
 ```
+
+**Verify on your server (important):** do not make a decision (blocking, rewards, age gates) from the
+result on the phone; an app can be tampered with. Send `result["token"]` to your own server. It runs the
+**same check** as a web integration: verify the signature (RSA-PSS, enclave key), consume the nonce once,
+and read the result against the condition stored with the nonce. Details:
+https://verifyblind.com/ai-integration.md (pattern A, step 4).
 
 `checkVerificationResult` returns `null` while the result is not ready; call it again every few seconds.
 If the user cancelled, it throws a `VerifyBlindException` with code `USER_CANCELLED`; the reason is in
@@ -380,6 +395,7 @@ number. Verifications made with a demo card return `validations.is_test: true`, 
 
 | Version | Description |
 |---------|-------------|
+| 1.0.1 | `token` in the result: the enclave-signed raw answer (same format as the web widget token), for server-side verification |
 | 1.0.0 | First release: temporary-key (PoP) flow, validations, App Link and app-return support |
 
 ---
