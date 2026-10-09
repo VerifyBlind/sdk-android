@@ -76,9 +76,9 @@ mavenPublishing {
             }
         }
         scm {
-            url.set("https://github.com/VerifyBlind/sdk-android")
-            connection.set("scm:git:git://github.com/VerifyBlind/sdk-android.git")
-            developerConnection.set("scm:git:ssh://git@github.com/VerifyBlind/sdk-android.git")
+            url.set("https://github.com/VerifyBlind/verifyblind-sdk-android")
+            connection.set("scm:git:git://github.com/VerifyBlind/verifyblind-sdk-android.git")
+            developerConnection.set("scm:git:ssh://git@github.com/VerifyBlind/verifyblind-sdk-android.git")
         }
     }
 }
